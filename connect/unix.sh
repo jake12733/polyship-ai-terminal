@@ -29,15 +29,18 @@ if ! command -v ollama >/dev/null 2>&1 && [ ! -d "/Applications/Ollama.app" ]; t
     warn "공식 앱 다운로드 중... (ollama.com)"
     TMPZ="$(mktemp -d)/Ollama.zip"
     if curl -fL --progress-bar https://ollama.com/download/Ollama-darwin.zip -o "$TMPZ" && ditto -x -k "$TMPZ" /Applications; then
-      say "OK  /Applications/Ollama.app 설치"
+      say "=============================================="
+      say "   Ollama 설치가 완료되었습니다!"
+      say "=============================================="
+      osascript -e 'display notification "Ollama 설치가 완료되었습니다." with title "DARK CODE"' >/dev/null 2>&1
       open -a Ollama; sleep 5
     elif command -v brew >/dev/null 2>&1; then brew install --cask ollama
     else err "자동 설치 실패. https://ollama.com/download 에서 설치 후 다시 실행해 주세요."; open "https://ollama.com/download"; exit 1; fi
   else
-    curl -fsSL https://ollama.com/install.sh | sh
+    curl -fsSL https://ollama.com/install.sh | sh && say "==============================================" && say "   Ollama 설치가 완료되었습니다!" && say "=============================================="
   fi
 else
-  say "이미 설치돼 있어 설치는 건너뜁니다."
+  say "Ollama가 이미 설치되어 있습니다. 설치는 건너뜁니다."
 fi
 OLLAMA="$(command -v ollama || echo /Applications/Ollama.app/Contents/Resources/ollama)"
 say "OK  $OLLAMA"

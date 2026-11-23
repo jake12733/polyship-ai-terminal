@@ -80,9 +80,15 @@ if (-not $exe) {
   for ($i = 0; $i -lt 30 -and -not (Find-Ollama); $i++) { Start-Sleep -Seconds 2 }
   $exe = Find-Ollama
   if (-not $exe) { Say '설치를 확인하지 못했어요. https://ollama.com/download 에서 직접 설치한 뒤 이 파일을 다시 실행해 주세요.' 'Red'; Start-Process 'https://ollama.com/download'; Read-Host '엔터를 누르면 닫힙니다'; return }
-  Say 'OK  Ollama 설치 완료'
+  Write-Host ''
+  Say '=============================================='
+  Say '   Ollama 설치가 완료되었습니다!'
+  Say ('   위치: ' + $exe)
+  Say '   이어서 DARK CODE 연결 설정을 진행합니다.'
+  Say '=============================================='
+  try { [void](New-Object -ComObject WScript.Shell).Popup("Ollama 설치가 완료되었습니다.`n`n이어서 DARK CODE 연결 설정을 자동으로 진행합니다.", 6, 'DARK CODE', 64) } catch {}
 } else {
-  Say '이미 설치돼 있어 설치는 건너뜁니다.'
+  Say 'Ollama가 이미 설치되어 있습니다. 설치는 건너뜁니다.'
 }
 Say ("OK  " + $exe)
 
