@@ -1,0 +1,162 @@
+# DARK CODE - Ollama 원클릭 연결 (Windows PowerShell 5.1+)
+# 실행: powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://jake12733.github.io/darkcode-ai/connect/win.txt | iex"
+# 하는 일: Ollama 설치 확인/설치 -> 사이트 접속 허용(OLLAMA_ORIGINS) -> Ollama 재시작 -> 연결 확인
+#         -> 없는 DARK CODE 모델 자동 생성 -> 'Ollama 켜기' 버튼용 darkcode-ollama:// 등록 -> 사이트 열기
+
+$ErrorActionPreference = 'Continue'
+try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch {}
+try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor 3072 } catch {}
+
+$SITE    = 'https://jake12733.github.io/darkcode-ai/'
+$BASE    = 'https://jake12733.github.io/darkcode-ai/models/'
+$ORIGINS = @('https://jake12733.github.io')
+$API     = 'http://127.0.0.1:11434'
+$MODELS  = @('router','music','dev','media','qa','critic')
+$BASEMODEL = 'qwen3:8b'
+$HOME_DC = Join-Path $env:LOCALAPPDATA 'DarkCode'
+
+function Say($m, $c = 'Green') { Write-Host $m -ForegroundColor $c }
+function Step($n, $m) { Write-Host ''; Write-Host ("[{0}/7] {1}" -f $n, $m) -ForegroundColor Cyan }
+
+function Find-Ollama {
+  $cands = @()
+  $cmd = Get-Command ollama -ErrorAction SilentlyContinue
+  if ($cmd) { $cands += $cmd.Source }
+  $cands += (Join-Path $env:LOCALAPPDATA 'Programs\Ollama\ollama.exe')
+  $cands += (Join-Path $env:ProgramFiles 'Ollama\ollama.exe')
+  foreach ($c in $cands) { if ($c -and (Test-Path $c)) { return $c } }
+  return $null
+}
+
+function Test-Api {
+  try { $r = Invoke-WebRequest -UseBasicParsing -Uri "$API/api/version" -TimeoutSec 3; return ($r.StatusCode -eq 200) } catch { return $false }
+}
+
+function Wait-Api($sec) {
+  for ($i = 0; $i -lt $sec; $i++) { if (Test-Api) { return $true }; Start-Sleep -Seconds 1 }
+  return $false
+}
+
+function Start-OllamaApp($exe) {
+  $dir = Split-Path $exe
+  $app = @((Join-Path $dir 'ollama app.exe'), (Join-Path $dir 'Ollama.exe')) | Where-Object { Test-Path $_ } | Select-Object -First 1
+  if ($app) { Start-Process -FilePath $app | Out-Null }
+  else { Start-Process -FilePath $exe -ArgumentList 'serve' -WindowStyle Hidden | Out-Null }
+}
+
+Write-Host ''
+Say '=============================================='
+Say '   DARK CODE  ::  Ollama 원클릭 연결'
+Say '=============================================='
+
+# 1. Ollama 설치 확인
+Step 1 'Ollama 설치 확인'
+$exe = Find-Ollama
+if (-not $exe) {
+  Say 'Ollama가 없어 자동으로 설치합니다. (설치 파일 약 1.9GB, 인터넷 속도에 따라 몇 분 걸려요)' 'Yellow'
+  $ProgressPreference = 'SilentlyContinue'
+  $setup = Join-Path $env:TEMP 'OllamaSetup.exe'
+  $ok = $false
+  try {
+    Say '  공식 설치 파일 다운로드 중... (ollama.com)' 'Yellow'
+    Invoke-WebRequest -UseBasicParsing -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile $setup
+    Say '  설치 중... (창이 잠깐 보일 수 있어요)' 'Yellow'
+    Start-Process -FilePath $setup -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait
+    $ok = $true
+  } catch { Say ('  직접 다운로드 실패: ' + $_.Exception.Message) 'Red' }
+  if (-not $ok -or -not (Find-Ollama)) {
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($winget) { Say '  winget으로 다시 시도합니다...' 'Yellow'; winget install --id Ollama.Ollama -e --silent --accept-source-agreements --accept-package-agreements }
+  }
+  $ProgressPreference = 'Continue'
+  $env:Path = [Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')
+  for ($i = 0; $i -lt 30 -and -not (Find-Ollama); $i++) { Start-Sleep -Seconds 2 }
+  $exe = Find-Ollama
+  if (-not $exe) { Say '설치를 확인하지 못했어요. https://ollama.com/download 에서 직접 설치한 뒤 이 파일을 다시 실행해 주세요.' 'Red'; Start-Process 'https://ollama.com/download'; Read-Host '엔터를 누르면 닫힙니다'; return }
+  Say 'OK  Ollama 설치 완료'
+} else {
+  Say '이미 설치돼 있어 설치는 건너뜁니다.'
+}
+Say ("OK  " + $exe)
+
+# 2. 사이트 접속 허용
+Step 2 '사이트 접속 허용 (OLLAMA_ORIGINS)'
+$cur = [Environment]::GetEnvironmentVariable('OLLAMA_ORIGINS','User')
+$list = @()
+if ($cur) { $list += ($cur -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+foreach ($o in $ORIGINS) { if ($list -notcontains $o) { $list += $o } }
+$merged = ($list -join ',')
+[Environment]::SetEnvironmentVariable('OLLAMA_ORIGINS', $merged, 'User')
+$env:OLLAMA_ORIGINS = $merged
+Say ("OK  OLLAMA_ORIGINS = " + $merged)
+
+# 3. Ollama 재시작 (새 설정 적용)
+Step 3 'Ollama 재시작'
+Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -in @('ollama app','ollama','Ollama') } | Stop-Process -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 2
+Start-OllamaApp $exe
+if (Wait-Api 60) { Say 'OK  Ollama 실행 중' } else { Say 'Ollama가 60초 안에 켜지지 않았어요. 트레이에서 직접 실행한 뒤 다시 시도해 주세요.' 'Red'; Read-Host '엔터를 누르면 닫힙니다'; return }
+
+# 4. 연결 확인 (브라우저와 같은 방식으로 검사)
+Step 4 '사이트 연결 확인'
+$ok = $false
+try {
+  $r = Invoke-WebRequest -UseBasicParsing -Uri "$API/api/tags" -Method Options -Headers @{ Origin = $ORIGINS[0]; 'Access-Control-Request-Method' = 'POST' } -TimeoutSec 5
+  $ok = ($r.StatusCode -lt 300)
+} catch { $ok = $false }
+if ($ok) { Say 'OK  사이트에서 Ollama 호출 허용됨' } else { Say '허용 확인 실패. 잠시 후 사이트에서 다시 확인해 보세요.' 'Yellow' }
+
+# 5. DARK CODE 모델 확인/생성
+Step 5 'DARK CODE 모델 확인'
+$have = @()
+try { $have = (Invoke-RestMethod -Uri "$API/api/tags" -TimeoutSec 10).models | ForEach-Object { ($_.name -replace ':latest$','') } } catch {}
+$missing = $MODELS | Where-Object { $have -notcontains ("ai-" + $_) }
+if (-not $missing) {
+  Say 'OK  모델 6개 모두 있음'
+} else {
+  Say ("없는 모델: " + (($missing | ForEach-Object { 'ai-' + $_ }) -join ', ')) 'Yellow'
+  if ($have -notcontains $BASEMODEL) {
+    Say ("기본 모델 " + $BASEMODEL + " 받는 중 (약 5GB, 처음 한 번만)") 'Yellow'
+    & $exe pull $BASEMODEL
+  }
+  New-Item -ItemType Directory -Force -Path (Join-Path $HOME_DC 'models') | Out-Null
+  foreach ($m in $missing) {
+    $f = Join-Path $HOME_DC ("models\Modelfile." + $m)
+    try {
+      $wc = New-Object Net.WebClient; $wc.Encoding = [Text.Encoding]::UTF8
+      [IO.File]::WriteAllText($f, $wc.DownloadString($BASE + 'Modelfile.' + $m), (New-Object Text.UTF8Encoding($false)))
+      & $exe create ("ai-" + $m) -f $f
+      Say ("OK  ai-" + $m)
+    } catch { Say ("ai-" + $m + " 생성 실패: " + $_.Exception.Message) 'Red' }
+  }
+}
+
+# 6. 사이트의 'Ollama 켜기' 버튼 등록 (darkcode-ollama://)
+Step 6 "'Ollama 켜기' 버튼 등록"
+New-Item -ItemType Directory -Force -Path $HOME_DC | Out-Null
+$starter = Join-Path $HOME_DC 'start-ollama.ps1'
+$starterBody = @"
+`$o = [Environment]::GetEnvironmentVariable('OLLAMA_ORIGINS','User'); if (`$o) { `$env:OLLAMA_ORIGINS = `$o }
+try { if ((Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:11434/api/version' -TimeoutSec 2).StatusCode -eq 200) { exit } } catch {}
+`$exe = '$exe'
+`$dir = Split-Path `$exe
+`$app = @((Join-Path `$dir 'ollama app.exe'), (Join-Path `$dir 'Ollama.exe')) | Where-Object { Test-Path `$_ } | Select-Object -First 1
+if (`$app) { Start-Process -FilePath `$app } else { Start-Process -FilePath `$exe -ArgumentList 'serve' -WindowStyle Hidden }
+"@
+[IO.File]::WriteAllText($starter, $starterBody, (New-Object Text.UTF8Encoding($true)))
+$key = 'HKCU:\Software\Classes\darkcode-ollama'
+New-Item -Path "$key\shell\open\command" -Force | Out-Null
+Set-ItemProperty -Path $key -Name '(Default)' -Value 'URL:DARK CODE Ollama'
+Set-ItemProperty -Path $key -Name 'URL Protocol' -Value ''
+Set-ItemProperty -Path "$key\shell\open\command" -Name '(Default)' -Value ('powershell.exe -NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "' + $starter + '"')
+Say 'OK  다음부터는 사이트의 [Ollama 켜기] 버튼으로 켤 수 있어요'
+
+# 7. 사이트 열기
+Step 7 '사이트 열기'
+Start-Process ($SITE + '?connected=1')
+Write-Host ''
+Say '=============================================='
+Say '   연결 완료! 브라우저에서 DARK CODE가 열립니다.'
+Say '   브라우저가 "로컬 네트워크 접근"을 물으면 [허용]'
+Say '=============================================='
+Start-Sleep -Seconds 4
